@@ -15,6 +15,7 @@ __pycache__/
 
 # Generated predictions and experiment outputs
 predictions.csv
+forecast_results.csv
 *.log
 
 # Local datasets — keep private until sharing permission is confirmed

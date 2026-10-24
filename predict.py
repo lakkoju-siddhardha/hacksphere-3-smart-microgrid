@@ -1,80 +1,159 @@
+
+import os
 import numpy as np
-
 import pandas as pd
-
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+QUICKML_ENDPOINT_URL = os.getenv("QUICKML_ENDPOINT_URL")
+QUICKML_ENDPOINT_KEY = os.getenv("QUICKML_ENDPOINT_KEY")
+ZOHO_ACCESS_TOKEN = os.getenv("ZOHO_ACCESS_TOKEN")
+CATALYST_ORG = os.getenv("CATALYST_ORG")
+CATALYST_ENVIRONMENT = os.getenv(
+    "CATALYST_ENVIRONMENT", "Development"
+)
+
+REQUIRED_COLUMNS = [
+    "timestamp",
+    "ambient_temp_c",
+    "humidity_pct",
+    "solar_irradiance_wm2",
+]
+
+BATCH_SIZE = 50
+REQUEST_TIMEOUT = 30
 
 
-QUICKML_ENDPOINT_URL = "YOUR_PUBLISHED_QUICKML_ENDPOINT_URL_HERE"
+def predict(input_df: pd.DataFrame) -> np.ndarray:
+    """Predict demand using the published Zoho QuickML endpoint."""
 
+    if input_df.empty:
+        return np.array([], dtype=float)
 
-def predict(input_df: pd.DataFrame):
+    missing_columns = [
+        col for col in REQUIRED_COLUMNS
+        if col not in input_df.columns
+    ]
+    if missing_columns:
+        raise ValueError(
+            f"Missing columns: {', '.join(missing_columns)}"
+        )
 
-    """Parameters:
+    config = {
+        "QUICKML_ENDPOINT_URL": QUICKML_ENDPOINT_URL,
+        "QUICKML_ENDPOINT_KEY": QUICKML_ENDPOINT_KEY,
+        "ZOHO_ACCESS_TOKEN": ZOHO_ACCESS_TOKEN,
+        "CATALYST_ORG": CATALYST_ORG,
+    }
 
+    missing_config = [
+        key for key, value in config.items() if not value
+    ]
+    if missing_config:
+        raise RuntimeError(
+            "Missing environment variables: "
+            + ", ".join(missing_config)
+        )
 
-        input_df (pandas.DataFrame): DataFrame with columns
+    headers = {
+        "X-QUICKML-ENDPOINT-KEY": QUICKML_ENDPOINT_KEY,
+        "Authorization": f"Zoho-oauthtoken {ZOHO_ACCESS_TOKEN}",
+        "CATALYST-ORG": CATALYST_ORG,
+        "Environment": CATALYST_ENVIRONMENT,
+        "Content-Type": "application/json",
+    }
 
-        ['timestamp', 'ambient_temp_c', 'humidity_pct', 'solar_irradiance_wm2']
+    all_predictions = []
+    total = len(input_df)
+    total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
 
+    with requests.Session() as session:
+        for start in range(0, total, BATCH_SIZE):
+            batch = input_df.iloc[start:start + BATCH_SIZE]
 
-    Returns:
+            records = batch[REQUIRED_COLUMNS].copy()
+            records["timestamp"] = records["timestamp"].astype(str)
 
-        numpy.ndarray or list: Predicted demand (kW) for each input row.
+            # Convert NumPy values to native Python values for JSON.
+            records = records.astype(object).where(
+                pd.notna(records), None
+            )
+            payload = {"data": records.to_dict(orient="records")}
 
-    """
+            batch_number = start // BATCH_SIZE + 1
 
+            try:
+                response = session.post(
+                    QUICKML_ENDPOINT_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                result = response.json()
 
-    if QUICKML_ENDPOINT_URL != "YOUR_PUBLISHED_QUICKML_ENDPOINT_URL_HERE":
+            except requests.RequestException as exc:
+                status = (
+                    exc.response.status_code
+                    if exc.response is not None
+                    else "no HTTP response"
+                )
+                raise RuntimeError(
+                    f"QuickML request failed for batch "
+                    f"{batch_number}/{total_batches}; "
+                    f"HTTP status: {status}. "
+                    "Check endpoint configuration and credentials."
+                ) from exc
 
-        try:
+            values = result.get("result")
 
+            if (
+                result.get("status") != "success"
+                or not isinstance(values, list)
+                or len(values) != len(batch)
+            ):
+                raise RuntimeError(
+                    f"Unexpected QuickML response for batch "
+                    f"{batch_number}/{total_batches}. "
+                    f"Expected {len(batch)} predictions; "
+                    "check the endpoint response format."
+                )
 
-            payload = {"data": input_df.to_dict(orient="records")}
+            try:
+                batch_predictions = np.asarray(values, dtype=float)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"QuickML returned non-numeric predictions "
+                    f"for batch {batch_number}."
+                ) from exc
 
+            if not np.isfinite(batch_predictions).all():
+                raise RuntimeError(
+                    f"QuickML returned invalid numeric values "
+                    f"for batch {batch_number}."
+                )
 
-            response = requests.post(
+            all_predictions.extend(batch_predictions.tolist())
 
-                QUICKML_ENDPOINT_URL, json=payload, timeout=10
-
+            print(
+                f"Completed batch {batch_number}/{total_batches} "
+                f"({len(all_predictions)}/{total} records)"
             )
 
-            response.raise_for_status()
-
-
-            result = response.json()
-
-            return np.array(result["predictions"], dtype=float)
-
-
-        except Exception as e:
-
-            print(f"Warning: QuickML endpoint call failed ({e}).")
-
-
-    hours = pd.to_datetime(input_df["timestamp"]).dt.hour
-
-    base_load = 120.0 + 30.0 * np.sin(2 * np.pi * (hours - 6) / 24)
-
-    cooling_load = np.maximum(0.0, input_df["ambient_temp_c"] - 24.0) * 8.5
-
-
-    dummy_predictions = (base_load + cooling_load).values
-
-    return np.array(dummy_predictions, dtype=float)
+    return np.asarray(all_predictions, dtype=float)
 
 
 if __name__ == "__main__":
-
-
-    print("Testing predict.py on sample_test_input.csv...")
+    print("Testing connection to Zoho QuickML...")
 
     sample_df = pd.read_csv("sample_test_input.csv")
+    predictions = predict(sample_df)
 
-    preds = predict(sample_df)
+    print("\nQuickML prediction completed successfully!")
+    print(f"Total records: {len(predictions)}")
+    print("First 5 predictions:")
 
-    print(
-
-        f"Generated {len(preds)} predictions. First 5 samples:\n{preds[:5]}"
-
-    ) 
+    for value in predictions[:5]:
+        print(f"{value:.2f} kW")
