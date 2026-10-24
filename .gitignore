@@ -1,0 +1,27 @@
+```gitignore
+# Python environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/
+
+# Generated predictions and experiment outputs
+predictions.csv
+*.log
+
+# Local datasets — keep private until sharing permission is confirmed
+train_telemetry.csv
+sample_test_input.csv
+
+# Operating system files
+.DS_Store
+Thumbs.db
+```
