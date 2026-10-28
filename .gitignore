@@ -1,4 +1,4 @@
-```gitignore
+
 # Python environment
 .venv/
 venv/
@@ -16,6 +16,7 @@ __pycache__/
 # Generated predictions and experiment outputs
 predictions.csv
 forecast_results.csv
+forecast_24h_results.csv
 *.log
 
 # Local datasets — keep private until sharing permission is confirmed
@@ -25,4 +26,3 @@ sample_test_input.csv
 # Operating system files
 .DS_Store
 Thumbs.db
-```

@@ -1,4 +1,6 @@
-
+from zoho_auth import get_access_token
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import os
 import numpy as np
 import pandas as pd
@@ -23,7 +25,7 @@ REQUIRED_COLUMNS = [
 ]
 
 BATCH_SIZE = 50
-REQUEST_TIMEOUT = 30
+REQUEST_TIMEOUT = (10, 90)
 
 
 def predict(input_df: pd.DataFrame) -> np.ndarray:
@@ -59,17 +61,33 @@ def predict(input_df: pd.DataFrame) -> np.ndarray:
 
     headers = {
         "X-QUICKML-ENDPOINT-KEY": QUICKML_ENDPOINT_KEY,
-        "Authorization": f"Zoho-oauthtoken {ZOHO_ACCESS_TOKEN}",
+        "Authorization": f"Zoho-oauthtoken {get_access_token()}",
         "CATALYST-ORG": CATALYST_ORG,
         "Environment": CATALYST_ENVIRONMENT,
         "Content-Type": "application/json",
+
     }
 
     all_predictions = []
     total = len(input_df)
     total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
 
+    
+    retry_strategy = Retry(
+    total=3,
+    connect=3,
+    read=2,
+    backoff_factor=2,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["POST"],
+    respect_retry_after_header=True,
+)
+
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+
     with requests.Session() as session:
+        session.mount("https://", adapter)
+
         for start in range(0, total, BATCH_SIZE):
             batch = input_df.iloc[start:start + BATCH_SIZE]
 
@@ -104,7 +122,8 @@ def predict(input_df: pd.DataFrame) -> np.ndarray:
                     f"QuickML request failed for batch "
                     f"{batch_number}/{total_batches}; "
                     f"HTTP status: {status}. "
-                    "Check endpoint configuration and credentials."
+                    "Check endpoint configuration, credentials, "
+                    "or network connectivity."
                 ) from exc
 
             values = result.get("result")
@@ -142,18 +161,75 @@ def predict(input_df: pd.DataFrame) -> np.ndarray:
                 f"({len(all_predictions)}/{total} records)"
             )
 
+
+
     return np.asarray(all_predictions, dtype=float)
 
 
 if __name__ == "__main__":
-    print("Testing connection to Zoho QuickML...")
+    import argparse
 
-    sample_df = pd.read_csv("sample_test_input.csv")
-    predictions = predict(sample_df)
+    parser = argparse.ArgumentParser(
+        description="Generate energy demand predictions using Zoho QuickML."
+    )
+    parser.add_argument(
+        "--input",
+        default="sample_test_input.csv",
+        help="Path to the input CSV file",
+    )
+    parser.add_argument(
+        "--output",
+        default="predictions.csv",
+        help="Path to save the prediction CSV file",
+    )
+
+    args = parser.parse_args()
+
+    print("Loading input data...")
+
+    input_df = pd.read_csv(args.input)
+
+    missing_columns = [
+        col for col in REQUIRED_COLUMNS
+        if col not in input_df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Input CSV is missing required columns: "
+            f"{', '.join(missing_columns)}"
+        )
+
+    print(f"Loaded {len(input_df)} records.")
+    print("Connecting to Zoho QuickML...")
+
+    predictions = predict(input_df)
+
+    if len(predictions) != len(input_df):
+        raise RuntimeError(
+            f"Expected {len(input_df)} predictions, "
+            f"but received {len(predictions)}."
+        )
+
+    if not np.isfinite(predictions).all():
+        raise RuntimeError("Predictions contain invalid numeric values.")
+
+    output_df = pd.DataFrame({
+        "timestamp": input_df["timestamp"].values,
+        "target_demand_kw": predictions,
+    })
+
+    output_df.to_csv(
+        args.output,
+        index=False,
+        float_format="%.2f",
+    )
 
     print("\nQuickML prediction completed successfully!")
-    print(f"Total records: {len(predictions)}")
-    print("First 5 predictions:")
+    print(f"Total records: {len(output_df)}")
+    print(f"Output file: {os.path.abspath(args.output)}")
+    print(f"Output columns: {list(output_df.columns)}")
+    print("\nFirst 5 predictions:")
 
-    for value in predictions[:5]:
-        print(f"{value:.2f} kW")
+    print(output_df.head().to_string(index=False))
+

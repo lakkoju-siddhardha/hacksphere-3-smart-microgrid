@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>GridSense AI | Smart Energy Microgrid</title>
+    <link rel="preload" href="{{ url_for('static', filename='fonts/ibm-plex-sans-latin-400-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Chart.js is bundled locally (static/vendor) so the demo works offline. -->
+    <script src="{{ url_for('static', filename='vendor/chart.umd.min.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to dashboard</a>
+
+<div class="shell">
+
+    <!-- ───────── Sidebar ───────── -->
+    <aside class="sidebar">
+        <a class="brand" href="#overview" aria-label="GridSense AI, go to overview">
+            <svg class="brand-mark" viewBox="0 0 32 32" width="32" height="32" aria-hidden="true" focusable="false">
+                <rect x="1" y="1" width="30" height="30" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M17.5 5.5 9 18h6l-1.5 8.5L23 13.5h-6.2z" fill="currentColor"/>
+            </svg>
+            <span class="brand-text">
+                <span class="brand-name">GridSense AI</span>
+                <span class="brand-sub">Microgrid forecasting</span>
+            </span>
+        </a>
+
+        <nav class="nav" aria-label="Dashboard sections">
+            <ul>
+                <li><a href="#overview" data-nav="overview">
+                    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3 3h6v6H3zM11 3h6v4h-6zM11 9h6v8h-6zM3 11h6v6H3z"/></svg>
+                    <span>Overview</span></a></li>
+                <li><a href="#forecast" data-nav="forecast">
+                    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M2 15l4.5-5 3 3L14 6l4 4" /><path d="M2 18h16" /></svg>
+                    <span>Demand Forecast</span></a></li>
+                <li><a href="#operations" data-nav="operations">
+                    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="3"/><path d="M10 2v3M10 15v3M2 10h3M15 10h3M4.3 4.3l2.1 2.1M13.6 13.6l2.1 2.1M4.3 15.7l2.1-2.1M13.6 6.4l2.1-2.1"/></svg>
+                    <span>Grid Operations</span></a></li>
+                <li><a href="#alerts" data-nav="alerts">
+                    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 3l8 14H2z"/><path d="M10 8.5v4M10 14.8v.2"/></svg>
+                    <span>Alerts</span>
+                    <span class="nav-badge" id="navAlertBadge" hidden></span></a></li>
+                <li><a href="#about" data-nav="about">
+                    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.2"/></svg>
+                    <span>About Project</span></a></li>
+            </ul>
+        </nav>
+
+        <p class="sidebar-foot">HackSphere 3.0 demo build. Forecasts are model estimates, not live telemetry.</p>
+    </aside>
+
+    <!-- ───────── Main column ───────── -->
+    <div class="content">
+
+        <header class="topbar">
+            <div class="topbar-title">
+                <h1>Microgrid demand forecast</h1>
+                <p>24 hourly demand predictions from a QuickML regression model, with grid-mode recommendations from the configured switching rules.</p>
+            </div>
+
+            <div class="topbar-actions">
+                <div class="pill" id="apiStatus" data-state="idle" role="status" aria-live="polite">
+                    <span class="pill-dot" aria-hidden="true"></span>
+                    <span class="pill-text" id="apiStatusText">API: no request yet</span>
+                </div>
+                <button type="button" class="btn btn-secondary" id="refreshButton">
+                    <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M16.5 10a6.5 6.5 0 1 1-2-4.7M16.5 3.5v3.3h-3.3"/></svg>
+                    <span>Regenerate</span>
+                </button>
+                
+<button type="button" class="btn btn-secondary" id="liveWeatherButton">
+    Use Live Weather Forecast
+</button>
+
+            </div>
+        </header>
+
+        <main id="main" tabindex="-1">
+
+            <!-- Weather assumptions -->
+            <section class="panel assumptions" aria-labelledby="assumptionsTitle">
+                <div class="panel-head">
+                    <div>
+                        <h2 id="assumptionsTitle">Weather assumptions</h2>
+                        <p class="panel-sub">Values you enter here drive the forecast. They are not live weather data.</p>
+                    </div>
+                    <p class="assumption-badge" id="assumptionBadge" data-state="none">
+                        <span class="badge-dot" aria-hidden="true"></span>
+                        <span id="assumptionBadgeText">No forecast generated yet</span>
+                    </p>
+                </div>
+
+                <form id="weatherForm" novalidate>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="temperature">Ambient temperature (°C)</label>
+                            <input id="temperature" name="ambient_temp_c" type="number" inputmode="decimal"
+                                   min="-50" max="60" step="any" value="28" required
+                                   aria-describedby="temperatureHelp temperatureError">
+                            <p class="field-help" id="temperatureHelp">Between -50 and 60</p>
+                            <p class="field-error" id="temperatureError" hidden></p>
+                        </div>
+                        <div class="field">
+                            <label for="humidity">Humidity (%)</label>
+                            <input id="humidity" name="humidity_pct" type="number" inputmode="decimal"
+                                   min="0" max="100" step="any" value="65" required
+                                   aria-describedby="humidityHelp humidityError">
+                            <p class="field-help" id="humidityHelp">Between 0 and 100</p>
+                            <p class="field-error" id="humidityError" hidden></p>
+                        </div>
+                        <div class="field">
+                            <label for="solar">Solar irradiance (W/m²)</label>
+                            <input id="solar" name="solar_irradiance_wm2" type="number" inputmode="decimal"
+                                   min="0" max="1500" step="any" value="0" required
+                                   aria-describedby="solarHelp solarError">
+                            <p class="field-help" id="solarHelp">Between 0 and 1500. Use 0 for night.</p>
+                            <p class="field-error" id="solarError" hidden></p>
+                        </div>
+                        <div class="field field-submit">
+                            <button type="submit" class="btn btn-primary" id="forecastButton">
+                                <span class="spinner" aria-hidden="true"></span>
+                                <span id="forecastButtonText">Generate 24-Hour Forecast</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <p class="form-status" id="formStatus" role="status" aria-live="polite"></p>
+                    <p class="form-error" id="formError" role="alert" hidden></p>
+                </form>
+
+                <p class="limitation">
+                    <strong>Demo limitation:</strong> the same weather values are applied to all 24 hours.
+                    This is not a weather-driven forecast with independently varying future conditions.
+                </p>
+            </section>
+
+            <!-- Overview: KPI cards -->
+            <section id="overview" class="section" aria-labelledby="overviewTitle">
+                <h2 class="section-title" id="overviewTitle">Overview</h2>
+                <div class="kpis" id="kpis">
+                    <article class="kpi">
+                        <h3>Peak predicted demand</h3>
+                        <p class="kpi-value"><span id="kpiPeak">—</span><span class="kpi-unit">kW</span></p>
+                        <p class="kpi-note" id="kpiPeakNote">Awaiting forecast</p>
+                    </article>
+                    <article class="kpi">
+                        <h3>Average predicted demand</h3>
+                        <p class="kpi-value"><span id="kpiAvg">—</span><span class="kpi-unit">kW</span></p>
+                        <p class="kpi-note" id="kpiAvgNote">Awaiting forecast</p>
+                    </article>
+                    <article class="kpi">
+                        <h3>Renewable Storage Mode hours</h3>
+                        <p class="kpi-value"><span id="kpiRenewable">—</span><span class="kpi-unit">h</span></p>
+                        <p class="kpi-note" id="kpiRenewableNote">Awaiting forecast</p>
+                    </article>
+                    <article class="kpi" id="kpiAlertCard" data-level="none">
+                        <h3>Critical overload alerts</h3>
+                        <p class="kpi-value"><span id="kpiAlerts">—</span></p>
+                        <p class="kpi-note" id="kpiAlertsNote">Awaiting forecast</p>
+                    </article>
+                </div>
+            </section>
+            <!-- Battery Storage -->
+<section id="battery" class="section">
+    <h2 class="section-title">Battery Storage</h2>
+
+    <div class="panel battery-panel">
+        <div class="battery-heading">
+            <div>
+                <p class="panel-sub">Simulated battery state of charge</p>
+                <p class="battery-value">
+                    <span id="batterySoc">--</span>%
+                </p>
+            </div>
+            <span id="batteryActionBadge" class="battery-badge">
+                Waiting for forecast
+            </span>
+        </div>
+
+        <div class="battery-track">
+            <div id="batterySocBar" class="battery-fill"></div>
+        </div>
+
+        <div class="battery-stats">
+            <div>
+                <span>Battery power</span>
+                <strong id="batteryPower">-- kW</strong>
+            </div>
+            <div>
+                <span>Minimum SOC</span>
+                <strong id="batteryMinSoc">--%</strong>
+            </div>
+            <div>
+                <span>Final SOC</span>
+                <strong id="batteryFinalSoc">--%</strong>
+            </div>
+        </div>
+
+        <p class="panel-sub">
+            Battery values are simulated and do not control physical equipment.
+        </p>
+    </div>
+</section>
+            <!-- Demand forecast: chart + table -->
+            <section id="forecast" class="section" aria-labelledby="forecastTitle">
+                <h2 class="section-title" id="forecastTitle">Demand forecast</h2>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <h3 class="panel-title">Predicted demand, next 24 hours</h3>
+                            <p class="panel-sub" id="chartWindow">Generate a forecast to see predictions.</p>
+                        </div>
+                    </div>
+
+                    <div class="chart-box" id="chartBox">
+                        <canvas id="demandChart" role="img"
+                                aria-label="Line chart of predicted hourly demand in kilowatts. No forecast generated yet."></canvas>
+                        <p class="chart-empty" id="chartEmpty">No forecast yet. Enter weather assumptions above and generate a forecast.</p>
+                    </div>
+
+                    <ul class="chart-key" aria-label="Chart key">
+                        <li><span class="key-dot key-main"></span>Point in Main Grid Mode</li>
+                        <li><span class="key-dot key-renew"></span>Point in Renewable Storage Mode</li>
+                        <li><span class="key-dot key-crit"></span>Point at or above 200 kW</li>
+                    </ul>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <div>
+                            <h3 class="panel-title" id="tableTitle">Hourly forecast</h3>
+                            <p class="panel-sub">Chronological order. Times are server local time.</p>
+                        </div>
+                    </div>
+                    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="tableTitle">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Timestamp</th>
+                                    <th scope="col" class="num">Predicted demand</th>
+                                    <th scope="col">Grid operating mode</th>
+                                    <th scope="col">Critical alert</th>
+                                </tr>
+                            </thead>
+                            <tbody id="forecastTable">
+                                <tr class="empty-row"><td colspan="4">Generate a forecast to see hourly results.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Grid operations + Alerts -->
+            <div class="split">
+                <section id="operations" class="section" aria-labelledby="operationsTitle">
+                    <h2 class="section-title" id="operationsTitle">Grid operations</h2>
+                    <div class="panel">
+                        <div class="mode-tiles">
+                            <div class="mode-tile" data-mode="main">
+                                <h3>Main Grid Mode</h3>
+                                <p class="mode-hours"><span id="modeMainHours">—</span><span class="kpi-unit">h</span></p>
+                            </div>
+                            <div class="mode-tile" data-mode="renewable">
+                                <h3>Renewable Storage Mode</h3>
+                                <p class="mode-hours"><span id="modeRenewHours">—</span><span class="kpi-unit">h</span></p>
+                            </div>
+                        </div>
+
+                        <div class="mode-split" id="modeSplit" role="img" aria-label="Share of forecast hours by grid mode. No forecast yet.">
+                            <span class="split-main" id="splitMain"></span>
+                            <span class="split-renew" id="splitRenew"></span>
+                        </div>
+
+                        <h3 class="panel-title strip-title" id="stripTitle">Mode by hour</h3>
+                        <ol class="hour-strip" id="hourStrip" aria-labelledby="stripTitle">
+                            <li class="strip-empty">Generate a forecast to see the hourly schedule.</li>
+                        </ol>
+
+                        <h3 class="panel-title rules-title">Switching rules</h3>
+                        <ul class="rules">
+                            <li>Demand above 160 kW switches to Renewable Storage Mode.</li>
+                            <li>Hours from 18:00 through 22:00 inclusive also use Renewable Storage Mode.</li>
+                            <li>All other hours use Main Grid Mode.</li>
+                        </ul>
+                        <p class="note">
+                            These are software recommendations based on the configured switching rules.
+                            They are not commands to physical equipment, and no grid switching takes place.
+                        </p>
+                    </div>
+                </section>
+
+                <section id="alerts" class="section" aria-labelledby="alertsTitle">
+                    <h2 class="section-title" id="alertsTitle">Alerts</h2>
+                    <div class="panel">
+                        <p class="panel-sub alerts-rule">A critical overload is predicted demand of 200 kW or more. Alerts are independent of the grid mode.</p>
+                        <div id="alertsBody" aria-live="polite">
+                            <p class="empty-state">Generate a forecast to check for critical overloads.</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- About -->
+            <section id="about" class="section" aria-labelledby="aboutTitle">
+                <h2 class="section-title" id="aboutTitle">About project</h2>
+                <div class="panel about">
+                    <p>
+                        GridSense AI is a hackathon project for HackSphere 3.0. A Flask service sends your weather
+                        assumptions to a published Zoho Catalyst QuickML regression model, then a rule-based controller
+                        labels each predicted hour with a grid operating mode and checks it for critical overload.
+                    </p>
+                    <dl class="about-list">
+                        <div><dt>Prediction</dt><dd>One QuickML demand prediction per hour for the next 24 hours.</dd></div>
+                        <div><dt>Grid mode</dt><dd>Rule-based recommendation. No physical equipment is controlled.</dd></div>
+                        <div><dt>Weather input</dt><dd>Entered by you and held constant across all 24 hours. No live weather feed is used.</dd></div>
+                        <div><dt>Telemetry</dt><dd>None. Nothing on this page is measured from a real grid.</dd></div>
+                    </dl>
+                </div>
+            </section>
+
+        </main>
+    </div>
+</div>
+</body>
+</html>

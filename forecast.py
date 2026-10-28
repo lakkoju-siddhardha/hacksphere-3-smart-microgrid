@@ -1,4 +1,4 @@
-
+from battery_simulator import simulate_battery
 import pandas as pd
 
 from predict import predict
@@ -22,8 +22,11 @@ def generate_forecast(input_csv="sample_test_input.csv"):
     print("\nRequesting predictions from Zoho QuickML...")
     predictions = predict(input_df)
 
-    print("\nApplying smart grid rules...")
+    print("\nApplying smart grid rules...") 
     forecast_df = build_forecast(input_df, predictions)
+
+    print("\nSimulating battery state of charge...")
+    forecast_df = simulate_battery(forecast_df)
 
     output_file = "forecast_results.csv"
     forecast_df.to_csv(output_file, index=False)
